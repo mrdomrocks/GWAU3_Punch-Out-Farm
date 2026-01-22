@@ -1,4 +1,4 @@
-MrDomRocks Presents - Kilroy Stoneskin Punch Out Farm - GWAU3 version
+MrDomRocks Presents - Kilroy Stonekin's Punch Out Farm - GWAU3 version
 
 With thanks to GWAU3 Community I have put together a working and for the most part fully functional Kilroy Stoneskin Punch Out Farm This farm uses the Smartcast system to use the Brawling Skills used in the Fronis Instance. It's not perfect but it works.
 
