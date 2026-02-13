@@ -15,7 +15,7 @@
 
 #Region Global Constants & Variables
 ; === Pathfinding DLL ===
-Global $DLL_PATH = "..\..\API\Plugins\Pathfinder\GWPathfinder.dll"
+Global $DLL_PATH = "..\..\API\Pathfinding\GWPathfinder.dll"
 
 ; === Bot Settings ===
 Global Const $BotTitle = "Punch Out Farmer by MrDomRocks"

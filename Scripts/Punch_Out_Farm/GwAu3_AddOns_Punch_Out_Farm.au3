@@ -98,10 +98,9 @@ Func Brawling_Fight($x)
     Local $LocalTimer = TimerInit()
     Local $bRecoveryMode = False
     Local $hRecoveryTimer = 0
-
     Do
         If GetNumberOfFoesInRangeOfAgent(-2, 1500) = 0 Then ExitLoop
-        If TimerDiff($LocalTimer) > 180000 Then ExitLoop
+        If GetNumberOfFoesInRangeOfAgent(-2, 1500) = 0 Then ExitLoop
         If GetPartyDead() Then ExitLoop
 
         ; Recovery Logic
@@ -128,7 +127,7 @@ Func Brawling_Fight($x)
         EndIf
 
         $target = GetNearestEnemyToAgent(-2, 1500, $GC_I_AGENT_TYPE_LIVING, 1, "Brawling_EnemyFilter")
-        If $target = 0 Then
+        $target = GetNearestEnemyToAgent(-2, 1500, $GC_I_AGENT_TYPE_LIVING, 1, "Brawling_EnemyFilter")
             ExitLoop
         EndIf
 
@@ -137,6 +136,7 @@ Func Brawling_Fight($x)
         ; Move to target if out of range
         If $distance > 150 Then ; Brawling range is short
             Agent_ChangeTarget($target)
+            Agent_Attack($target)
             Agent_Attack($target)
             Sleep(250)
             $distance = Brawling_GetDistance($target, -2)
@@ -148,9 +148,12 @@ Func Brawling_Fight($x)
                     Sleep(100)
                     $distance = Brawling_GetDistance($target, -2)
                 Until $distance < 200 Or TimerDiff($MoveTimer) > 3000 Or GetPartyDead()
+                Do
+                    Sleep(100)
+                    $distance = Brawling_GetDistance($target, -2)
+                Until $distance < 200 Or TimerDiff($MoveTimer) > 3000 Or GetPartyDead()
             EndIf
-        EndIf
-
+            UAI_CacheSkillBar() ; Refresh skill cache before combat
         ; Combat Loop (Cycle skills once then re-evaluate)
         If $distance < 300 Then
             UAI_CacheSkillBar() ; Refresh skill cache before combat
@@ -180,8 +183,6 @@ Func Brawling_Fight($x)
                             ExitLoop ; Re-evaluate after successful skill usage (GCD/Priority)
                         EndIf
                     EndIf
-                EndIf
-            Next
         EndIf
 
     Until Agent_GetAgentInfo($target, 'ID') = 0 Or GetPartyDead() Or TimerDiff($LocalTimer) > 180000
