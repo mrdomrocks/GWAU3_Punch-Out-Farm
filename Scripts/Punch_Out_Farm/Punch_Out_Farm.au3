@@ -403,8 +403,8 @@ Func SellCycle()
                  Local $l_i_ModelID = Item_GetItemInfoByPtr($l_p_Item, 'ModelID')
                  
                  If $l_i_Type <> $GC_I_TYPE_KIT And $l_i_Type <> $GC_I_TYPE_DYE Then
-                    ; Exclude Lockpicks, Stone Summit Emblems, Dwarven Ales, and Superior Identification Kits
-                    If $l_i_ModelID <> 22751 And $l_i_ModelID <> 27044 And $l_i_ModelID <> 5585 And $l_i_ModelID <> 24593 And $l_i_ModelID <> $GC_I_MODELID_SUPERIOR_IDENTIFICATION_KIT And $l_i_ModelID <> $GC_I_MODELID_IDENTIFICATION_KIT Then
+                    ; Exclude Lockpicks, Stone Summit Emblems, Dwarven Ales, Superior Identification Kits, and Crafting Materials
+                    If $l_i_ModelID <> 22751 And $l_i_ModelID <> 27044 And $l_i_ModelID <> 5585 And $l_i_ModelID <> 24593 And $l_i_ModelID <> $GC_I_MODELID_SUPERIOR_IDENTIFICATION_KIT And $l_i_ModelID <> $GC_I_MODELID_IDENTIFICATION_KIT And Not IsCraftingMaterial($l_i_ModelID) Then
 
                         Merchant_SellItem($l_p_Item)
                         Sleep(250)

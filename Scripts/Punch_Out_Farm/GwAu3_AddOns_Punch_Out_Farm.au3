@@ -337,4 +337,11 @@ EndFunc
 Func IsRareMaterial($aItemPtr)
     Return Item_GetItemIsRareMaterial($aItemPtr)
 EndFunc
+
+Func IsCraftingMaterial($aModelID)
+    For $i = 1 To $GC_AI_ALL_MATERIALS[0]
+        If $GC_AI_ALL_MATERIALS[$i] = $aModelID Then Return True
+    Next
+    Return False
+EndFunc
 #EndRegion Loot
