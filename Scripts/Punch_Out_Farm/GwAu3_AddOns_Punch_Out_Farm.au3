@@ -59,8 +59,13 @@ Func Brawling_IsRecharged($aSkill)
     Return Skill_GetSkillbarInfo($aSkill, "IsRecharged")
 EndFunc
 
+Func Brawling_IsCasting()
+    Return Skill_GetSkillbarInfo(1, "Casting") <> 0
+EndFunc
+
 Func Brawling_UseSkillEx($aSkill, $aTgt = -2, $aTimeout = 400)
     If GetIsDead(-2) Then Return False
+    If Brawling_IsCasting() Then Return False
     If Not Brawling_IsRecharged($aSkill) Then Return False
 
     Local $lDeadlock = TimerInit()
@@ -148,40 +153,63 @@ Func Brawling_Fight($x)
             UAI_CacheSkillBar() ; Refresh skill cache before combat
         EndIf
 
-        ; Combat Loop (Cycle skills once then re-evaluate)
-        If $distance < 300 Then
-            UAI_CacheSkillBar() ; Refresh skill cache before combat
-            For $i = 1 To 8
-                If GetPartyDead() Then ExitLoop 2
-                If Agent_GetAgentInfo($target, 'HP') <= 0 Then ExitLoop
-                If $i = 8 Then ContinueLoop ; Skip Stand Up! in combat loop
+            ; Combat Loop (Adjusted based on Adrenaline.vb)
+            If $distance < 300 Then
+                UAI_CacheSkillBar() ; Refresh skill cache before combat
+                UAI_UpdateDynamicSkillbarCache() ; Refresh dynamic data (Adrenaline, Recharge)
 
-                If Brawling_IsRecharged($i) Then
-                    ; Check adrenaline requirements
-                    Local $iAdrenaline = Skill_GetSkillbarInfo($i, "Adrenaline")
-                    Local $iCost = Skill_GetSkillInfo(Skill_GetSkillbarInfo($i, "ID"), "Adrenaline")
-
-                    If $iAdrenaline >= $iCost Then
-                        Local $bUsed = False
-
-                        ; Smartcast Logic for Skill 1 (Priority)
-                        If $i = 1 Then
-                            ; Cast regardless of range if it's a movement/charge skill or self-buff
-                            ; Or if distance is very close
-                            $bUsed = Brawling_UseSkillEx($i, $target, 200) ; Faster timeout
-                        Else
-                            $bUsed = Brawling_UseSkillEx($i, $target)
-                        EndIf
-
-                        If $bUsed Then
-                            ExitLoop ; Re-evaluate after successful skill usage (GCD/Priority)
-                        EndIf
-                    EndIf
+                If Brawling_IsCasting() Then
+                    Sleep(50)
+                    ContinueLoop
                 EndIf
-            Next
-        EndIf
 
-    Until Agent_GetAgentInfo($target, 'ID') = 0 Or GetPartyDead() Or TimerDiff($LocalTimer) > 180000
+                ; Ensure target is selected
+                Local $currentTargetID = Agent_GetCurrentTarget()
+                Local $targetID = Agent_ConvertID($target)
+            
+                If $targetID = 0 Then ExitLoop
+
+                If $currentTargetID <> $targetID Then
+                    Agent_ChangeTarget($target)
+                    Agent_Attack($target)
+                    Sleep(250)
+                EndIf
+
+                If GetPartyDead() Then ExitLoop
+                If Agent_GetAgentInfo($target, 'HP') <= 0 Then ContinueLoop
+
+                If UAI_CanCast(1) Then 
+                    If Brawling_UseSkillEx(1, $target, 200) Then ContinueLoop
+                EndIf
+                
+                If UAI_CanCast(2) Then 
+                    If Brawling_UseSkillEx(2, $target) Then ContinueLoop
+                EndIf
+                
+                If UAI_CanCast(3) Then 
+                    If Brawling_UseSkillEx(3, $target) Then ContinueLoop
+                EndIf
+                
+                If UAI_CanCast(5) Then 
+                    Skill_UseSkill(5, $target)
+                    Sleep(250)
+                    ContinueLoop
+                EndIf
+                
+                If UAI_CanCast(6) Then 
+                    Skill_UseSkill(6, $target)
+                    Sleep(250)
+                    ContinueLoop
+                EndIf
+                
+                If UAI_CanCast(4) Then 
+                    Skill_UseSkill(4, $target)
+                    Sleep(250)
+                    ContinueLoop
+                EndIf
+            EndIf
+
+    Until ($target <> 0 And Agent_GetAgentInfo($target, 'ID') = 0) Or GetPartyDead() Or TimerDiff($LocalTimer) > 180000
 EndFunc
 
 Func Brawling_ClearArea($range = 1500)
