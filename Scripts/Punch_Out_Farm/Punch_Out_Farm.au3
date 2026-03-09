@@ -69,6 +69,7 @@ GUI_LoadCharacterList()
 GUISetOnEvent($GUI_EVENT_CLOSE, "CloseBot", $Form1)
 GUICtrlSetOnEvent($Start, "ToggleBot")
 GUICtrlSetOnEvent($gHardModeCheckbox, "OnHardModeToggle")
+GUICtrlSetOnEvent($gRenderingCheckbox, "OnRenderingToggle")
 
 ; Registered Characters Events
 GUICtrlSetOnEvent($g_i_CtrlID_Button_Add, "GUI_Main_OnAdd")
@@ -143,6 +144,16 @@ Func OnHardModeToggle()
         "Thunderfist Brass Knuckles with Sundering or Furious Mods" & @CRLF & _
         "Dagger Handle of Shelter" & @CRLF & _
         "Brawn over Brains Inscription")
+    EndIf
+EndFunc
+
+Func OnRenderingToggle()
+    If GUICtrlRead($gRenderingCheckbox) = $GUI_CHECKED Then
+        Ui_DisableRendering()
+        Update("Rendering Disabled")
+    Else
+        Ui_EnableRendering()
+        Update("Rendering Enabled")
     EndIf
 EndFunc
 #EndRegion Event Handlers

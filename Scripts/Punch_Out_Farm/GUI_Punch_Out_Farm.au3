@@ -18,7 +18,7 @@
 #include <GuiTab.au3>
 #include <ListViewConstants.au3>
 
-Global $Start, $RunInfosGroup, $RunsLabel, $TimeLabel, $Ales, $Form1, $gIdentifyCheckbox, $gSellCheckbox, $gHardModeCheckbox, $ConsoleEdit
+Global $Start, $RunInfosGroup, $RunsLabel, $TimeLabel, $Ales, $Form1, $gIdentifyCheckbox, $gSellCheckbox, $gHardModeCheckbox, $gRenderingCheckbox, $ConsoleEdit
 Global $SuccessLabel, $FailuresLabel
 Global $CharacterChoiceCombo
 Global $BotRunning = False
@@ -49,6 +49,8 @@ GUICtrlSetFont(-1, 8, 400, 0, "Arial")
 $gSellCheckbox = GUICtrlCreateCheckbox("Auto Sell", 45, 84, 120, 20)
 GUICtrlSetFont(-1, 8, 400, 0, "Arial")
 $gHardModeCheckbox = GUICtrlCreateCheckbox("Hard Mode", 45, 113, 120, 20)
+GUICtrlSetFont(-1, 8, 400, 0, "Arial")
+$gRenderingCheckbox = GUICtrlCreateCheckbox("Disable Rendering", 45, 142, 120, 20)
 GUICtrlSetFont(-1, 8, 400, 0, "Arial")
 GUICtrlCreateTabItem("Statistics")
 $TimeLabel = GUICtrlCreateLabel("Time: 00:00:00", 45, 87, 200, 20)
