@@ -213,7 +213,7 @@ Func Brawling_Fight($x)
 EndFunc
 
 Func Brawling_ClearArea($range = 1500)
-    Out("Clearing area (Range: " & $range & ")...")
+    ; Out("Clearing area (Range: " & $range & ")...")
 
     While True
         If GetPartyDead() Then Return False
@@ -221,7 +221,7 @@ Func Brawling_ClearArea($range = 1500)
         Local $target = GetNearestEnemyToAgent(-2, $range, $GC_I_AGENT_TYPE_LIVING, 1, "Brawling_EnemyFilter")
 
         If $target == 0 Then
-            Out("Area clear.")
+            ; Out("Area clear.")
             Return True
         EndIf
 

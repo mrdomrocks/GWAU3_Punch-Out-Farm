@@ -11,6 +11,9 @@
 #include "GUI_Punch_Out_Farm.au3"
 #include "..\..\API\Plugins\UtilityAI\_UtilityAI.au3"
 #include "..\..\API\Plugins\Pathfinder\Pathfinder_Movements.au3"
+#include "Security.au3"
+#include "PunchOut_Launcher.au3"
+#include "GwAu3_PunchOut_GUI_Logic.au3"
 #EndRegion Includes
 
 #Region Global Constants & Variables
@@ -42,6 +45,7 @@ Global Const $Dialog_Accept = 0x835807
 Global Const $maxAllowdEnergy = 120
 Global Const $intAdrenaline[7] = [0, 0, 0, 100, 250, 175, 0]
 Global $g_i_Runs = 0
+Global $g_i_Successes = 0
 Global $g_i_Fails = 0
 Global $g_i_Ales = 0
 Global $g_i_StartTime = TimerInit()
@@ -52,11 +56,8 @@ Opt("GUIOnEventMode", True)
 Opt("GUICloseOnESC", False)
 Opt("ExpandVarStrings", 1)
 
-; Populate Character Combo on Load
-Local $sLogedChars = Scanner_GetLoggedCharNames()
-If $sLogedChars <> "" Then
-    GUICtrlSetData($CharacterChoiceCombo, $sLogedChars, StringSplit($sLogedChars, "|")[1])
-EndIf
+; Initialize Character List
+GUI_LoadCharacterList()
 #EndRegion Global Constants & Variables
 
 #Region Event Handlers
@@ -67,18 +68,12 @@ EndIf
 
 GUISetOnEvent($GUI_EVENT_CLOSE, "CloseBot", $Form1)
 GUICtrlSetOnEvent($Start, "ToggleBot")
-GUICtrlSetOnEvent($RefreshButton, "RefreshCharacters")
 GUICtrlSetOnEvent($gHardModeCheckbox, "OnHardModeToggle")
 
-Func RefreshCharacters()
-    Local $sLogedChars = Scanner_GetLoggedCharNames()
-    If $sLogedChars <> "" Then
-        GUICtrlSetData($CharacterChoiceCombo, "|" & $sLogedChars, StringSplit($sLogedChars, "|")[1])
-        Update("Character list refreshed")
-    Else
-        Update("No characters found")
-    EndIf
-EndFunc
+; Registered Characters Events
+GUICtrlSetOnEvent($g_i_CtrlID_Button_Add, "GUI_Main_OnAdd")
+GUICtrlSetOnEvent($g_i_CtrlID_Button_Edit, "GUI_Main_OnEdit")
+GUICtrlSetOnEvent($g_i_CtrlID_Button_Remove, "GUI_Main_OnRemove")
 
 Func ToggleBot()
     If Not $BotRunning Then
@@ -89,10 +84,39 @@ Func ToggleBot()
         EndIf
 
         If Not $Bot_Core_Initialized Then
-            If Not Core_Initialize($sChar) Then
-                MsgBox(0, "Error", "Failed to initialize bot core with character: " & $sChar)
-                Return
+            Local $bInitialized = False
+            
+            ; 1. Try to initialize as running client
+            If Core_Initialize($sChar, True) Then
+                $bInitialized = True
+            Else
+                ; 2. If not running, check if it is a registered character and launch it
+                Update("Character not found running. Checking registered list...")
+                
+                ; Check if character exists in INI
+                Local $sIniFile = $GC_S_CHARACTERS_INI_PATH
+                Local $sEmail = IniRead($sIniFile, $sChar, "Email", "")
+                
+                If $sEmail <> "" Then
+                    Update("Launching character: " & $sChar)
+                    Local $iPID = Launch_LaunchAccountFromINI($sIniFile, $sChar)
+                    If $iPID <> 0 Then
+                        Sleep(2000) ; Wait for initialization
+                        If Core_Initialize($iPID) Then
+                            $bInitialized = True
+                        Else
+                            MsgBox(0, "Error", "Launched but failed to attach to: " & $sChar)
+                        EndIf
+                    Else
+                        MsgBox(0, "Error", "Failed to launch character: " & $sChar)
+                    EndIf
+                Else
+                    MsgBox(0, "Error", "Character not found (Running or Registered): " & $sChar)
+                EndIf
             EndIf
+
+            If Not $bInitialized Then Return
+            
             $Bot_Core_Initialized = True
             $g_s_MainCharName = $sChar
         EndIf
@@ -161,7 +185,7 @@ EndFunc
 ; =================================================================================================
 
 Func HandleOutpost()
-    Update("Handling Outpost Logic")
+    ; Update("Handling Outpost Logic")
 
     ; Hard Mode Logic
     Local $bHardMode = (GUICtrlRead($gHardModeCheckbox) = $GUI_CHECKED)
@@ -199,7 +223,7 @@ Func HandleOutpost()
 
     ; 3. Check Quest State
     Local $l_i_QuestState = Quest_GetQuestInfo($FRONIS_QUEST, "LogState")
-    Update("Quest State: " & $l_i_QuestState)
+    ; Update("Quest State: " & $l_i_QuestState)
     
     If $l_i_QuestState = $QuestStateComplete Then
         Update("Quest Completed - Claiming Reward")
@@ -562,6 +586,7 @@ Func RunPunchOutSequence()
     WEnd
 
     $g_i_Runs += 1
+    $g_i_Successes += 1
     $g_i_Ales += 1 ; Increment count (Assuming success)
     UpdateGUIStats()
     
@@ -570,6 +595,7 @@ Func RunPunchOutSequence()
     
     Sleep(5000)
 EndFunc
+
 #Region Helper Functions
 ; =================================================================================================
 ; Helper Functions
@@ -583,7 +609,8 @@ EndFunc
 
 Func UpdateGUIStats()
     GUICtrlSetData($RunsLabel, "Runs: " & $g_i_Runs)
-    ; GUICtrlSetData($FailuresLabel, "Failures: " & $g_i_Fails)
+    GUICtrlSetData($SuccessLabel, "Success: " & $g_i_Successes)
+    GUICtrlSetData($FailuresLabel, "Failures: " & $g_i_Fails)
     GUICtrlSetData($Ales, "Ales: " & $g_i_Ales)
     
     Local $iDiff = TimerDiff($g_i_StartTime)
