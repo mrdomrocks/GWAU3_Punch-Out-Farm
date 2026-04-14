@@ -5,21 +5,22 @@
 #ce
 #RequireAdmin
 
+; === Initialization (must run before GUI/control creation for OnEvent handlers) ===
+Opt("GUIOnEventMode", True)
+Opt("GUICloseOnESC", False)
+Opt("ExpandVarStrings", 1)
+
 #Region Includes
 #include "..\..\API\_GwAu3.au3"
 #include "GwAu3_AddOns_Punch_Out_Farm.au3"
 #include "GUI_Punch_Out_Farm.au3"
 #include "..\..\API\Plugins\UtilityAI\_UtilityAI.au3"
-#include "..\..\API\Plugins\Pathfinder\Pathfinder_Movements.au3"
 #include "Security.au3"
 #include "PunchOut_Launcher.au3"
 #include "GwAu3_PunchOut_GUI_Logic.au3"
 #EndRegion Includes
 
 #Region Global Constants & Variables
-; === Pathfinding DLL ===
-Global $DLL_PATH = "..\..\API\Pathfinding\GWPathfinder.dll"
-
 ; === Bot Settings ===
 Global Const $BotTitle = "Punch Out Farmer by MrDomRocks"
 Global $ProcessID = ""
@@ -50,11 +51,6 @@ Global $g_i_Fails = 0
 Global $g_i_Ales = 0
 Global $g_i_StartTime = TimerInit()
 Global $g_h_EditText = $ConsoleEdit ; Link to GUI control
-
-; === Initialization ===
-Opt("GUIOnEventMode", True)
-Opt("GUICloseOnESC", False)
-Opt("ExpandVarStrings", 1)
 
 ; Initialize Character List
 GUI_LoadCharacterList()
@@ -88,9 +84,14 @@ Func ToggleBot()
             Local $bInitialized = False
             
             ; 1. Try to initialize as running client
-            If Core_Initialize($sChar, True) Then
-                $bInitialized = True
-            Else
+            Local $l_a_GwProcesses = ProcessList("gw.exe")
+            If IsArray($l_a_GwProcesses) And $l_a_GwProcesses[0][0] > 0 Then
+                If Core_Initialize($sChar, True) Then
+                    $bInitialized = True
+                EndIf
+            EndIf
+
+            If Not $bInitialized Then
                 ; 2. If not running, check if it is a registered character and launch it
                 Update("Character not found running. Checking registered list...")
                 
@@ -120,6 +121,8 @@ Func ToggleBot()
             
             $Bot_Core_Initialized = True
             $g_s_MainCharName = $sChar
+
+            If Not PunchOut_AutoEnterSelectedCharacter($sChar) Then Return
         EndIf
 
         $BotRunning = True
@@ -222,7 +225,7 @@ Func HandleOutpost()
     
     If Agent_GetDistanceToXY($l_f_KilroyX, $l_f_KilroyY) > 250 Then
         Update("Moving to Kilroy...")
-        Pathfinder_MoveTo($l_f_KilroyX, $l_f_KilroyY)
+        PunchOut_IssueMove($l_f_KilroyX, $l_f_KilroyY)
         Sleep(500)
         Return
     EndIf
@@ -461,7 +464,7 @@ EndFunc
 
 Func RunPunchOutSequence()
     ; Move to safe start position
-    Pathfinder_MoveTo(-16919.56, -13485.12)
+    PunchOut_MoveToWait(-16919.56, -13485.12)
     Sleep(500)
     
     ; Cache skills ONCE at start
@@ -501,7 +504,7 @@ Func RunPunchOutSequence()
             EndIf
             
             ; Move command
-            Pathfinder_MoveTo($tX, $tY)
+            PunchOut_IssueMove($tX, $tY)
             
             ; Check for loot if safe
             If GetNumberOfFoesInRangeOfAgent(-2, 1000) < 1 Then
@@ -550,7 +553,7 @@ Func RunPunchOutSequence()
     If $l_i_SignpostID <> 0 Then
         Update("Interacting with final signpost")
         Agent_ChangeTarget($l_i_SignpostID)
-        Pathfinder_MoveTo(Agent_GetAgentInfo($l_i_SignpostID, "X"), Agent_GetAgentInfo($l_i_SignpostID, "Y"))
+        PunchOut_MoveToWait(Agent_GetAgentInfo($l_i_SignpostID, "X"), Agent_GetAgentInfo($l_i_SignpostID, "Y"), 100, 15000, 0)
         
         ; Loot check at final signpost
         If GetNumberOfFoesInRangeOfAgent(-2, 1000) < 1 Then
@@ -613,6 +616,56 @@ EndFunc
 ; General utility functions for finding targets, updating GUI, etc.
 ; =================================================================================================
 
+Func PunchOut_IssueMove($a_f_X, $a_f_Y, $a_f_Randomize = 0)
+    Local $l_f_X = $a_f_X
+    Local $l_f_Y = $a_f_Y
+    If $a_f_Randomize > 0 Then
+        $l_f_X += Random(-$a_f_Randomize, $a_f_Randomize)
+        $l_f_Y += Random(-$a_f_Randomize, $a_f_Randomize)
+    EndIf
+    Map_MoveLayer($l_f_X, $l_f_Y, Agent_GetAgentInfo(-2, "Plane"))
+    Return True
+EndFunc
+
+Func PunchOut_MoveToWait($a_f_X, $a_f_Y, $a_f_StopDist = 150, $a_i_TimeoutMs = 25000, $a_f_Randomize = 50)
+    Local $l_i_MapID = Map_GetCharacterInfo("MapID")
+    Local $l_i_InstanceType = Map_GetInstanceInfo("Type")
+    Local $l_i_Layer = Agent_GetAgentInfo(-2, "Plane")
+
+    Local $l_f_DestX = $a_f_X
+    Local $l_f_DestY = $a_f_Y
+    If $a_f_Randomize > 0 Then
+        $l_f_DestX += Random(-$a_f_Randomize, $a_f_Randomize)
+        $l_f_DestY += Random(-$a_f_Randomize, $a_f_Randomize)
+    EndIf
+
+    Map_MoveLayer($l_f_DestX, $l_f_DestY, $l_i_Layer)
+
+    Local $l_t_Timer = TimerInit()
+    While True
+        If Agent_GetAgentInfo(-2, "IsDead") Then Return False
+        If Map_GetCharacterInfo("MapID") <> $l_i_MapID Then Return False
+        If Map_GetInstanceInfo("Type") <> $l_i_InstanceType Then Return False
+        If Agent_GetDistanceToXY($a_f_X, $a_f_Y) <= $a_f_StopDist Then Return True
+
+        If Agent_GetAgentInfo(-2, "MoveX") = 0 And Agent_GetAgentInfo(-2, "MoveY") = 0 Then
+            $l_f_DestX = $a_f_X
+            $l_f_DestY = $a_f_Y
+            If $a_f_Randomize > 0 Then
+                $l_f_DestX += Random(-$a_f_Randomize, $a_f_Randomize)
+                $l_f_DestY += Random(-$a_f_Randomize, $a_f_Randomize)
+            EndIf
+            Map_MoveLayer($l_f_DestX, $l_f_DestY, $l_i_Layer)
+            Sleep(250)
+        Else
+            Map_MoveLayer($l_f_DestX, $l_f_DestY, $l_i_Layer)
+            Sleep(100)
+        EndIf
+
+        If $a_i_TimeoutMs > 0 And TimerDiff($l_t_Timer) > $a_i_TimeoutMs Then Return False
+    WEnd
+EndFunc
+
 Func Update($sText)
     _GUICtrlStatusBar_SetText($StatusBar1, $sText, 0)
     Out($sText)
@@ -629,6 +682,44 @@ Func UpdateGUIStats()
     Local $iMins = Floor(Mod($iDiff, 3600000) / 60000)
     Local $iSecs = Floor(Mod($iDiff, 60000) / 1000)
     GUICtrlSetData($TimeLabel, StringFormat("Time: %02d:%02d:%02d", $iHours, $iMins, $iSecs))
+EndFunc
+
+Func PunchOut_AutoEnterSelectedCharacter($a_s_Character)
+    Local $l_h_Wnd = $g_h_GWWindow
+    If $l_h_Wnd = 0 Then $l_h_Wnd = Scanner_GetHwnd($g_i_GWProcessId)
+    If $l_h_Wnd = 0 Then Return False
+
+    If PreGame_Ptr() = 0 Then Return True
+
+    Local $l_i_CurrentIndex = PreGame_ChosenCharacter()
+    Local $l_s_CurrentName = StringStripWS(PreGame_CharName($l_i_CurrentIndex), 3)
+
+    If StringCompare($l_s_CurrentName, $a_s_Character, 0) <> 0 Then
+        Local $l_i_InitialIndex = $l_i_CurrentIndex
+        Local $l_i_Attempts = 0
+        While $l_i_Attempts < 25
+            ControlSend($l_h_Wnd, "", "", "{RIGHT}")
+            Sleep(250)
+            $l_i_CurrentIndex = PreGame_ChosenCharacter()
+            $l_s_CurrentName = StringStripWS(PreGame_CharName($l_i_CurrentIndex), 3)
+            If StringCompare($l_s_CurrentName, $a_s_Character, 0) = 0 Then ExitLoop
+            $l_i_Attempts += 1
+            If $l_i_Attempts > 1 And $l_i_CurrentIndex = $l_i_InitialIndex Then ExitLoop
+        WEnd
+
+        If StringCompare($l_s_CurrentName, $a_s_Character, 0) <> 0 Then
+            Update("Character '" & $a_s_Character & "' not found on this account")
+            Return False
+        EndIf
+    EndIf
+
+    ControlSend($l_h_Wnd, "", "", "{ENTER}")
+    While PreGame_Ptr() <> 0
+        Sleep(500)
+    WEnd
+    Map_WaitMapLoading()
+    Sleep(1000)
+    Return True
 EndFunc
 
 ; Finds the nearest Gadget (Chest/Signpost) to specific coords

@@ -3,6 +3,7 @@
 #include <WindowsConstants.au3>
 #include <GuiListView.au3>
 #include <GuiComboBox.au3>
+#include <Array.au3>
 #include <File.au3>
 #include "Security.au3"
 
@@ -47,7 +48,7 @@ Func GUI_LoadCharacterList()
         
     Local $l_as_Sections = IniReadSectionNames($GC_S_CHARACTERS_INI_PATH)
     If @error Or Not IsArray($l_as_Sections) Then
-        GUICtrlSetData($CharacterChoiceCombo, $GC_S_DATA_SEPARATOR)
+        GUICtrlSetData($CharacterChoiceCombo, "No character selected", "No character selected")
         Security_CloseMutex($l_h_IniMutex)
         Return 0
     EndIf
@@ -94,7 +95,9 @@ Func GUI_LoadCharacterList()
     ; Let's prepend "Launcher: " to registered chars? No, that's ugly.
     ; Let's just list them.
     
-    GUICtrlSetData($CharacterChoiceCombo, $GC_S_DATA_SEPARATOR & $l_s_RegisteredChars)
+    Local $l_s_ComboData = "No character selected"
+    If $l_s_RegisteredChars <> "" Then $l_s_ComboData &= $GC_S_DATA_SEPARATOR & $l_s_RegisteredChars
+    GUICtrlSetData($CharacterChoiceCombo, $l_s_ComboData, "No character selected")
     
     ; Auto Size Columns
     For $i = 0 To 2

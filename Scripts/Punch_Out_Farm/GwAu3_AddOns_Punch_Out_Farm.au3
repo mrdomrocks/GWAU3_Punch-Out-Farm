@@ -232,55 +232,40 @@ Func Brawling_ClearArea($range = 1500)
 EndFunc
 
 Func Brawling_MoveTo($aDestX, $aDestY, $aAggroRange = 1500)
-    Local $lMyX, $lMyY
-    
-    ; Initial Path Calculation
-    Pathfinder_Initialize()
-    Local $lPath = _Pathfinder_GetPath(Agent_GetAgentInfo(-2, "X"), Agent_GetAgentInfo(-2, "Y"), Agent_GetAgentInfo(-2, "Plane"), $aDestX, $aDestY, 0)
-    
-    If Not IsArray($lPath) Then
-        Out("Path calculation failed. Moving directly.")
-        Map_Move($aDestX, $aDestY)
-        Return
-    EndIf
-    
-    Local $iPathIndex = 0
+    Local $l_i_MapID = Map_GetCharacterInfo("MapID")
+    Local $l_i_InstanceType = Map_GetInstanceInfo("Type")
+    Local $l_i_Layer = Agent_GetAgentInfo(-2, "Plane")
     Local $lTimer = TimerInit()
-    
+
+    Local $l_f_DestX = $aDestX + Random(-50, 50)
+    Local $l_f_DestY = $aDestY + Random(-50, 50)
+    Map_MoveLayer($l_f_DestX, $l_f_DestY, $l_i_Layer)
+
     While True
         If GetPartyDead() Then Return
-        If TimerDiff($lTimer) > 60000 Then 
+        If Map_GetCharacterInfo("MapID") <> $l_i_MapID Then Return
+        If Map_GetInstanceInfo("Type") <> $l_i_InstanceType Then Return
+        If TimerDiff($lTimer) > 60000 Then
             Out("Movement Timeout")
             Return
         EndIf
-        
-        $lMyX = Agent_GetAgentInfo(-2, "X")
-        $lMyY = Agent_GetAgentInfo(-2, "Y")
-        
-        ; Check if reached destination
+
         If Agent_GetDistanceToXY($aDestX, $aDestY) < 250 Then ExitLoop
-        
-        ; Fight & Loot using Aggro Range
+
         If GetNumberOfFoesInRangeOfAgent(-2, $aAggroRange) > 0 Then
             Brawling_ClearArea($aAggroRange)
             PickUpLoot()
         EndIf
-        
-        ; Move along path
-        If $iPathIndex < UBound($lPath) Then
-            Local $lWpX = $lPath[$iPathIndex][0]
-            Local $lWpY = $lPath[$iPathIndex][1]
-            
-            If Agent_GetDistanceToXY($lWpX, $lWpY) < 250 Then
-                $iPathIndex += 1
-            Else
-                Map_Move($lWpX, $lWpY)
-            EndIf
+
+        If Agent_GetAgentInfo(-2, "MoveX") = 0 And Agent_GetAgentInfo(-2, "MoveY") = 0 Then
+            $l_f_DestX = $aDestX + Random(-50, 50)
+            $l_f_DestY = $aDestY + Random(-50, 50)
+            Map_MoveLayer($l_f_DestX, $l_f_DestY, $l_i_Layer)
+            Sleep(250)
         Else
-            Map_Move($aDestX, $aDestY)
+            Map_MoveLayer($l_f_DestX, $l_f_DestY, $l_i_Layer)
+            Sleep(100)
         EndIf
-        
-        Sleep(100)
     WEnd
 EndFunc
 #EndRegion Combat

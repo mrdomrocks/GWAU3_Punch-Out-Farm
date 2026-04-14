@@ -27,12 +27,14 @@ Global Const $GC_S_GRID_DELIMITER = "|"
 Global $g_i_GridAllocatedSlot = -1
 Global $g_i_GWProcessId = 0 ; Set this after launch
 
+OnAutoItExitRegister("_PunchOut_Launcher_OnExit")
+
 ; ===============================================================================================================================
 ; Logging Helper
 ; ===============================================================================================================================
 Func _Launcher_Log($sMsg)
     ConsoleWrite($sMsg & @CRLF)
-    ; You can hook this to your GUI log if needed
+    If IsFunc("Out") Then Out($sMsg)
 EndFunc
 
 ; ===============================================================================================================================
@@ -41,7 +43,7 @@ EndFunc
 Func Launch_LaunchAccountFromINI($a_s_IniFile, $a_s_Character, $a_b_Restart = False)
     Local $l_i_Timeout = 10000
     Local $l_h_IniMutex = Security_AcquireFileMutex($a_s_IniFile, $l_i_Timeout)
-    If $l_h_IniMutex = 0 Then Return 0
+    If $l_h_IniMutex <= 0 Then Return 0
 
     Local $l_s_Email = IniRead($a_s_IniFile, $a_s_Character, "Email", "")
     Local $l_s_Pwd = Security_DecryptString(IniRead($a_s_IniFile, $a_s_Character, "Pwd", ""))
@@ -74,10 +76,14 @@ Func Launch_LaunchAccountFromINI($a_s_IniFile, $a_s_Character, $a_b_Restart = Fa
     _Launcher_Log("[INIT] E-Mail: " & $l_s_Email)
     _Launcher_Log("[INIT] Character: " & $a_s_Character)
 
+    Local $l_b_RequiresPasswordSend = StringInStr($l_s_Pwd, '"') > 0
+
     Local $l_s_Args = ' -fps 30'
     $l_s_Args &= ' -character ' & Launch_QuoteArg($a_s_Character)
     $l_s_Args &= ' -email ' & Launch_QuoteArg($l_s_Email)  
-    $l_s_Args &= ' -password ' & Launch_QuoteArg($l_s_Pwd)
+    If Not $l_b_RequiresPasswordSend Then
+        $l_s_Args &= ' -password ' & Launch_QuoteArg($l_s_Pwd)
+    EndIf
 
     Local $l_s_Cmd = Launch_QuoteArg($l_s_FilePath) & $l_s_Args
 
@@ -105,7 +111,7 @@ Func Launch_LaunchAccountFromINI($a_s_IniFile, $a_s_Character, $a_b_Restart = Fa
         "struct*", $l_d_ProcessInfo)
 
     If @error Or Not $l_av_Result[0] Then
-        _Launcher_Log("[ERR] Failed to launch process")
+        _Launcher_Log("[ERR] Failed to launch process (CreateProcessW). LastError=" & _WinAPI_GetLastError())
         Security_CloseMutex($g_h_GameMutex)
         Return 0
     EndIf
@@ -133,12 +139,7 @@ Func Launch_LaunchAccountFromINI($a_s_IniFile, $a_s_Character, $a_b_Restart = Fa
     EndIf
 
     If Not Launch_ApplyMultiClientPatch($l_h_Process) Then
-        _Launcher_Log("[ERR] Failed to apply MultiClient patch")
-        _WinAPI_CloseHandle($l_h_Thread)
-        _WinAPI_CloseHandle($l_h_Process)
-        _WinAPI_CloseHandle($l_h_Job)
-        Security_CloseMutex($g_h_GameMutex)
-        Return 0
+        _Launcher_Log("[WARN] MultiClient patch failed; continuing without patch")
     EndIf
 
     Local $l_av_Resume = DllCall("kernel32.dll", "dword", "ResumeThread", "handle", $l_h_Thread)
@@ -181,7 +182,70 @@ Func Launch_LaunchAccountFromINI($a_s_IniFile, $a_s_Character, $a_b_Restart = Fa
     
     $g_i_GWProcessId = $l_i_UpdatedPID
 
+    Local $l_i_Slot = Launch_AllocateGridSlot()
+    If $l_i_Slot <> -1 Then
+        Local $l_h_Wnd = Launch_ProcessWindowOfClass($g_i_GWProcessId, $GC_S_GWPROCESS_GAME_CLASS)
+        If $l_h_Wnd Then
+            Launch_MoveWindowToGridSlot($l_h_Wnd, $l_i_Slot)
+        EndIf
+    EndIf
+
+    If $l_b_RequiresPasswordSend Then
+        Local $l_h_LoginWnd = Launch_WaitForWindowOfClass($g_i_GWProcessId, $GC_S_GWPROCESS_GAME_CLASS, 30000)
+        If $l_h_LoginWnd Then
+            If Not Launch_SendPasswordAndEnter($l_h_LoginWnd, $l_s_Pwd) Then
+                _Launcher_Log("[WARN] Failed to send password to Gw.exe window")
+            EndIf
+        Else
+            _Launcher_Log("[WARN] Failed to find Gw.exe window for password entry")
+        EndIf
+    EndIf
+
     Return $l_i_UpdatedPID
+EndFunc
+
+Func Launch_WaitForWindowOfClass($a_i_PID, $a_s_Class, $a_i_TimeoutMs)
+    Local $l_i_T0 = TimerInit()
+    While TimerDiff($l_i_T0) < $a_i_TimeoutMs
+        Local $l_h_Wnd = Launch_ProcessWindowOfClass($a_i_PID, $a_s_Class)
+        If $l_h_Wnd Then Return $l_h_Wnd
+        Sleep(100)
+    WEnd
+    Return 0
+EndFunc
+
+Func Launch_SendPasswordAndEnter($a_h_Wnd, $a_s_Pwd)
+    WinActivate($a_h_Wnd)
+    WinWaitActive($a_h_Wnd, "", 2)
+    Sleep(200)
+    Launch_SendPassword($a_s_Pwd)
+    ControlSend($a_h_Wnd, "", "", "{ENTER}")
+    Return True
+EndFunc
+
+Func Launch_SendPassword($a_s_Pwd)
+    Local $l_i_Len = StringLen($a_s_Pwd)
+    For $i = 1 To $l_i_Len
+        Local $l_s_Char = StringMid($a_s_Pwd, $i, 1)
+        Switch $l_s_Char
+            Case "!"
+                Send("{!}")
+            Case "+"
+                Send("{+}")
+            Case "^"
+                Send("{^}")
+            Case "#"
+                Send("{#}")
+            Case "{"
+                Send("{{}")
+            Case "}"
+                Send("{}}")
+            Case '"'
+                Send('{"}')
+            Case Else
+                Send($l_s_Char)
+        EndSwitch
+    Next
 EndFunc
 
 Func Launch_QuoteArg($a_s_ArgumentString)
@@ -405,4 +469,154 @@ Func Launch_ProcessWindowOfClass($a_i_PID, $a_s_Class)
         EndIf
     Next
     Return 0
+EndFunc
+
+Func _PunchOut_Launcher_OnExit()
+    If $g_i_GWProcessId <> 0 And $g_i_GridAllocatedSlot <> -1 Then
+        Launch_ReleaseGridSlot($g_i_GridAllocatedSlot)
+    EndIf
+EndFunc
+
+Func Launch_AllocateGridSlot()
+    Local $l_i_Timeout = 10000
+    Local $l_h_Mutex = Security_AcquireFileMutex($GC_S_GRID_INI, $l_i_Timeout)
+    If $l_h_Mutex <= 0 Then Return SetError(1, 0, -1)
+
+    Local $l_i_PID = $g_i_GWProcessId
+    Local $l_i_Total = $GC_I_GRID_COLS * $GC_I_GRID_ROWS
+    Local $l_ai_Depth[$l_i_Total]
+
+    Local $i
+    For $i = 0 To $l_i_Total - 1
+        Local $l_s_Old = IniRead($GC_S_GRID_INI, "Slots", "S" & $i, "")
+        Local $l_s_Pruned = Launch_GridPIDListPrune($l_s_Old)
+        If $l_s_Pruned <> $l_s_Old Then
+            If $l_s_Pruned = "" Then
+                IniDelete($GC_S_GRID_INI, "Slots", "S" & $i)
+            Else
+                IniWrite($GC_S_GRID_INI, "Slots", "S" & $i, $l_s_Pruned)
+            EndIf
+        EndIf
+        $l_ai_Depth[$i] = Launch_GridPIDListCount($l_s_Pruned)
+    Next
+
+    Local $l_i_MinDepth = 0x7FFFFFFF, $l_i_Slot = -1
+    For $i = 0 To $l_i_Total - 1
+        If $l_ai_Depth[$i] < $l_i_MinDepth Then
+            $l_i_MinDepth = $l_ai_Depth[$i]
+            $l_i_Slot = $i
+        EndIf
+    Next
+
+    If $l_i_Slot = -1 Then
+        Security_CloseMutex($l_h_Mutex)
+        Return SetError(3, 0, -1)
+    EndIf
+
+    Local $l_s_List = IniRead($GC_S_GRID_INI, "Slots", "S" & $l_i_Slot, "")
+    Local $l_s_NewList = Launch_GridPIDListAppend($l_s_List, $l_i_PID)
+    Local $l_b_Write = IniWrite($GC_S_GRID_INI, "Slots", "S" & $l_i_Slot, $l_s_NewList)
+
+    Security_CloseMutex($l_h_Mutex)
+
+    If Not $l_b_Write Then
+        Return SetError(4, 0, -1)
+    EndIf
+
+    $g_i_GridAllocatedSlot = $l_i_Slot
+    Return $l_i_Slot
+EndFunc
+
+Func Launch_ReleaseGridSlot($a_i_Slot)
+    Local $l_i_Timeout = 5000
+    Local $l_h_Mutex = Security_AcquireFileMutex($GC_S_GRID_INI, $l_i_Timeout)
+    If $l_h_Mutex <= 0 Then $l_h_Mutex = 0
+
+    Local $l_i_PID = $g_i_GWProcessId
+    Local $l_s_Key  = "S" & $a_i_Slot
+    Local $l_s_List = IniRead($GC_S_GRID_INI, "Slots", $l_s_Key, "")
+
+    If $l_s_List <> "" Then
+        Local $l_s_NewList = Launch_RemoveGridPIDFromList($l_s_List, $l_i_PID)
+        If $l_s_NewList = "" Then
+            IniDelete($GC_S_GRID_INI, "Slots", $l_s_Key)
+        Else
+            IniWrite($GC_S_GRID_INI, "Slots", "S" & $a_i_Slot, $l_s_NewList)
+        EndIf
+    EndIf
+
+    Security_CloseMutex($l_h_Mutex)
+EndFunc
+
+Func Launch_MoveWindowToGridSlot($a_h_Wnd, $a_i_Slot)
+    Local $l_ai_Rect = Launch_GetGridSlotPosition($a_i_Slot)
+    WinMove($a_h_Wnd, "", $l_ai_Rect[0], $l_ai_Rect[1], $l_ai_Rect[2], $l_ai_Rect[3], 1)
+EndFunc
+
+Func Launch_GetGridSlotPosition($a_i_Slot)
+    Local $l_i_Left = 0, $l_i_Top = 0
+    Local $l_i_Width = @DesktopWidth, $l_i_Height = @DesktopHeight
+
+    Local $l_i_CellWidth  = Floor($l_i_Width  / $GC_I_GRID_COLS)
+    Local $l_i_CellHeight = Floor($l_i_Height / $GC_I_GRID_ROWS)
+
+    Local $l_i_Row = Floor($a_i_Slot / $GC_I_GRID_COLS)
+    Local $l_i_Col = Mod($a_i_Slot, $GC_I_GRID_COLS)
+
+    Local $l_i_X = $l_i_Left + ($l_i_Col * $l_i_CellWidth)
+    Local $l_i_Y = $l_i_Top  + ($l_i_Row * $l_i_CellHeight)
+
+    Local $l_ai_SlotPos[4] = [$l_i_X, $l_i_Y, $l_i_CellWidth, $l_i_CellHeight]
+    Return $l_ai_SlotPos
+EndFunc
+
+Func Launch_GridPIDListCount($a_s_List)
+    If $a_s_List = "" Then Return 0
+    Local $l_as_PIDs = StringSplit($a_s_List, $GC_S_GRID_DELIMITER)
+    Return $l_as_PIDs[0]
+EndFunc
+
+Func Launch_GridPIDListPrune($a_s_List)
+    If $a_s_List = "" Then Return ""
+
+    Local $l_as_PIDs = StringSplit($a_s_List, $GC_S_GRID_DELIMITER)
+    Local $l_s_NewList = ""
+    Local $i
+    For $i = 1 To $l_as_PIDs[0]
+        Local $l_i_PID = Number($l_as_PIDs[$i])
+        If $l_i_PID <> 0 And ProcessExists($l_i_PID) Then
+            If $l_s_NewList = "" Then
+                $l_s_NewList = $l_i_PID
+            Else
+                $l_s_NewList &= $GC_S_GRID_DELIMITER & $l_i_PID
+            EndIf
+        EndIf
+    Next
+    Return $l_s_NewList
+EndFunc
+
+Func Launch_RemoveGridPIDFromList($a_s_List, $a_i_PID)
+    If $a_s_List = "" Then Return ""
+
+    Local $l_as_PIDs = StringSplit($a_s_List, $GC_S_GRID_DELIMITER)
+    Local $l_s_NewList = ""
+    Local $i
+    For $i = 1 To $l_as_PIDs[0]
+        If Number($l_as_PIDs[$i]) <> Number($a_i_PID) Then
+            If $l_s_NewList = "" Then
+                $l_s_NewList = $l_as_PIDs[$i]
+            Else
+                $l_s_NewList &= $GC_S_GRID_DELIMITER & $l_as_PIDs[$i]
+            EndIf
+        EndIf
+    Next
+    Return $l_s_NewList
+EndFunc
+
+Func Launch_GridPIDListAppend($a_s_List, $a_i_Value)
+    If $a_s_List = "" Then
+        Return $a_i_Value
+    Else
+        Return $a_s_List & $GC_S_GRID_DELIMITER & $a_i_Value
+    EndIf
 EndFunc
