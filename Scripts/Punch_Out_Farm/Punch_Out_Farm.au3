@@ -309,10 +309,92 @@ EndFunc
 #EndRegion Claim Reward Logic
 
 #Region Merchant Logic
+; Inventory bags used by identify/sell (Backpack, Belt Pouch, Bag 1, Bag 2).
+; Uses Item_GetBagItemArray / Item_GetInventoryArray so bag scanning matches current GwAu3.
+Func PunchOut_InventoryBags()
+    Local $l_ai_Bags[4] = [$GC_I_INVENTORY_BACKPACK, $GC_I_INVENTORY_BELT_POUCH, $GC_I_INVENTORY_BAG1, $GC_I_INVENTORY_BAG2]
+    Return $l_ai_Bags
+EndFunc
+
+Func PunchOut_IsKeepItem($a_i_ModelID, $a_i_Type = 0)
+    If $a_i_Type = $GC_I_TYPE_KIT Or $a_i_Type = $GC_I_TYPE_DYE Then Return True
+    If $a_i_ModelID = $GC_I_MODELID_IDENTIFICATION_KIT Then Return True
+    If $a_i_ModelID = $GC_I_MODELID_SUPERIOR_IDENTIFICATION_KIT Then Return True
+    If $a_i_ModelID = 22751 Then Return True ; Lockpicks
+    If $a_i_ModelID = 27044 Then Return True ; Stone Summit Emblem
+    If $a_i_ModelID = 5585 Then Return True ; Dwarven Ale
+    If $a_i_ModelID = 24593 Then Return True ; Aged Dwarven Ale
+    If IsCraftingMaterial($a_i_ModelID) Then Return True
+    Return False
+EndFunc
+
+; Gear that can actually be identified. Skipping trophies/kits/materials avoids
+; Item_IdentifyItem waiting ~2.5s per item that will never become identified.
+Func PunchOut_CanIdentifyItem($a_i_Type, $a_i_ModelID, $a_i_Rarity)
+    If PunchOut_IsKeepItem($a_i_ModelID, $a_i_Type) Then Return False
+    Switch $a_i_Type
+        Case $GC_I_TYPE_KIT, $GC_I_TYPE_DYE, $GC_I_TYPE_MATERIAL_AND_ZCOINS, $GC_I_TYPE_GOLD_COINS, _
+                $GC_I_TYPE_TROPHY, $GC_I_TYPE_TROPHY_2, $GC_I_TYPE_USABLE, $GC_I_TYPE_KEY, _
+                $GC_I_TYPE_QUEST_ITEM, $GC_I_TYPE_BAG, $GC_I_TYPE_SCROLL, $GC_I_TYPE_PRESENT, _
+                $GC_I_TYPE_MINIPET, $GC_I_TYPE_BOOKS
+            Return False
+    EndSwitch
+    Switch $a_i_Rarity
+        Case $GC_I_RARITY_WHITE, $GC_I_RARITY_BLUE, $GC_I_RARITY_PURPLE, $GC_I_RARITY_GOLD
+            Return True
+    EndSwitch
+    Return False
+EndFunc
+
+Func PunchOut_ShouldSellItem($a_b_Identified, $a_i_Rarity, $a_i_Type, $a_i_ModelID)
+    If Not $a_b_Identified Then Return False
+    If $a_i_Rarity <> $GC_I_RARITY_WHITE And $a_i_Rarity <> $GC_I_RARITY_BLUE And $a_i_Rarity <> $GC_I_RARITY_PURPLE Then Return False
+    If PunchOut_IsKeepItem($a_i_ModelID, $a_i_Type) Then Return False
+    Return True
+EndFunc
+
+; Prefer a normal ID kit, fall back to superior. Uses Item_GetBagItemArray (GwAu3 bag-ptr update).
+Func PunchOut_FindIdentificationKit()
+    Local $l_p_Normal = 0
+    Local $l_p_Superior = 0
+    Local $l_ai_Bags = PunchOut_InventoryBags()
+    For $bag In $l_ai_Bags
+        Local $l_p_Bag = Item_GetBagPtr($bag)
+        If $l_p_Bag = 0 Then ContinueLoop
+
+        Local $l_ap_Items = Item_GetBagItemArray($l_p_Bag)
+        If Not IsArray($l_ap_Items) Then ContinueLoop
+
+        For $i = 1 To $l_ap_Items[0]
+            Local $l_p_Item = $l_ap_Items[$i]
+            If $l_p_Item = 0 Then ContinueLoop
+            Local $l_i_ModelID = Item_GetItemInfoByPtr($l_p_Item, 'ModelID')
+            If $l_i_ModelID = $GC_I_MODELID_IDENTIFICATION_KIT Then
+                $l_p_Normal = $l_p_Item
+            ElseIf $l_i_ModelID = $GC_I_MODELID_SUPERIOR_IDENTIFICATION_KIT Then
+                $l_p_Superior = $l_p_Item
+            EndIf
+        Next
+    Next
+    If $l_p_Normal <> 0 Then Return $l_p_Normal
+    Return $l_p_Superior
+EndFunc
+
+Func PunchOut_EnsureIdentificationKit()
+    If PunchOut_FindIdentificationKit() <> 0 Then Return True
+    Update("Buying ID Kit...")
+    Merchant_BuyItem($GC_I_MODELID_IDENTIFICATION_KIT, 1)
+    Sleep(1000)
+    Return PunchOut_FindIdentificationKit() <> 0
+EndFunc
+
 Func CheckBagsFull()
     Local $l_i_EmptySlots = 0
-    For $i = 1 To 4
-        $l_i_EmptySlots += Item_GetBagInfo(Item_GetBagPtr($i), "EmptySlots")
+    Local $l_ai_Bags = PunchOut_InventoryBags()
+    For $bag In $l_ai_Bags
+        Local $l_p_Bag = Item_GetBagPtr($bag)
+        If $l_p_Bag = 0 Then ContinueLoop
+        $l_i_EmptySlots += Item_GetBagInfo($l_p_Bag, "EmptySlots")
     Next
     ; Trigger if 4 or fewer slots are empty (Covering the "3-4 empty slots" requirement)
     Return ($l_i_EmptySlots <= 4)
@@ -322,78 +404,30 @@ Func HandleMerchant()
     Update("Bags full, going to merchant...")
     Map_TravelTo($map_ID_EoTN)
     Sleep(2000)
-    local $l_f_MerchX = -2748.00
-    local $l_f_MerchY = 1019.00
-   
+    Local $l_f_MerchX = -2748.00
+    Local $l_f_MerchY = 1019.00
+
     Local $MerchID = GetNearestNPC($l_f_MerchX, $l_f_MerchY)
     If $MerchID <> 0 Then
         Agent_ChangeTarget($MerchID)
         Agent_GoNPC($MerchID)
         Sleep(2000)
-        
-        If GUICtrlRead($gIdentifyCheckbox) = $GUI_CHECKED Then
+
+        Local $bIdentify = (GUICtrlRead($gIdentifyCheckbox) = $GUI_CHECKED)
+        Local $bSell = (GUICtrlRead($gSellCheckbox) = $GUI_CHECKED)
+
+        ; Restock kits before identifying so IdentifyCycle does not stall on empty kit search.
+        If $bIdentify Or $bSell Then
+            PunchOut_EnsureIdentificationKit()
+        EndIf
+
+        If $bIdentify Then
             IdentifyCycle()
         EndIf
-        
-        If GUICtrlRead($gSellCheckbox) = $GUI_CHECKED Then
-            ; Check for Identification Kit in Bag 1 Slot 2
-            Local $l_p_Bag1 = Item_GetBagPtr(1)
-            If $l_p_Bag1 <> 0 Then
-                Local $l_p_Slot2 = Item_GetItemBySlot(1, 2)
-                
-                ; If slot is empty or contains wrong item, try to find one and move it there
-                Local $bCorrectKit = False
-                If $l_p_Slot2 <> 0 Then
-                    If Item_GetItemInfoByPtr($l_p_Slot2, 'ModelID') = $GC_I_MODELID_IDENTIFICATION_KIT Then
-                        $bCorrectKit = True
-                    EndIf
-                EndIf
-                
-                If Not $bCorrectKit Then
-                    Update("Restocking ID Kit to Bag 1 Slot 2...")
-                    ; Scan all bags for a kit
-                    Local $bFound = False
-                    For $b = 1 To 4
-                        Local $l_p_Bag = Item_GetBagPtr($b)
-                        If $l_p_Bag = 0 Then ContinueLoop
-                        Local $l_i_Slots = Item_GetBagInfo($l_p_Bag, 'Slots')
-                        For $s = 1 To $l_i_Slots
-                            Local $l_p_Item = Item_GetItemBySlot($b, $s)
-                            If $l_p_Item <> 0 And Item_GetItemInfoByPtr($l_p_Item, 'ModelID') = $GC_I_MODELID_IDENTIFICATION_KIT Then
-                                Item_MoveItem($l_p_Item, 1, 2) ; Move to Bag 1 Slot 2
-                                Sleep(500)
-                                $bFound = True
-                                ExitLoop 2
-                            EndIf
-                        Next
-                    Next
-                    
-                    ; If still not found, buy one (if merchant window is open)
-                    If Not $bFound Then
-                        Update("Buying ID Kit...")
-                        ; Assumes merchant window is open and kit is available
-                        ; 2989 is the ModelID
-                        Merchant_BuyItem($GC_I_MODELID_IDENTIFICATION_KIT, 1) 
-                        Sleep(1000)
-                        ; Try to move it again after buying
-                        For $b = 1 To 4
-                            Local $l_p_Bag = Item_GetBagPtr($b)
-                            If $l_p_Bag = 0 Then ContinueLoop
-                            Local $l_i_Slots = Item_GetBagInfo($l_p_Bag, 'Slots')
-                            For $s = 1 To $l_i_Slots
-                                Local $l_p_Item = Item_GetItemBySlot($b, $s)
-                                If $l_p_Item <> 0 And Item_GetItemInfoByPtr($l_p_Item, 'ModelID') = $GC_I_MODELID_IDENTIFICATION_KIT Then
-                                    Item_MoveItem($l_p_Item, 1, 2)
-                                    Sleep(500)
-                                    ExitLoop 2
-                                EndIf
-                            Next
-                        Next
-                    EndIf
-                EndIf
-            EndIf
 
+        If $bSell Then
             SellCycle()
+            PunchOut_EnsureIdentificationKit()
         EndIf
     Else
         Update("Merchant not found!")
@@ -402,54 +436,39 @@ EndFunc
 
 Func IdentifyCycle()
     Update("Identifying items...")
-    Local $l_a_Bags = [1, 2, 3, 4]
-    For $bagIndex In $l_a_Bags
-        Local $l_p_Bag = Item_GetBagPtr($bagIndex)
-        If $l_p_Bag = 0 Then ContinueLoop
-        Local $l_i_Slots = Item_GetBagInfo($l_p_Bag, 'Slots')
-        For $slot = 1 To $l_i_Slots
-            Local $l_p_Item = Item_GetItemBySlot($bagIndex, $slot)
-            If $l_p_Item = 0 Then ContinueLoop
-            
-            Local $l_b_Identified = Item_GetItemInfoByPtr($l_p_Item, 'IsIdentified')
-            If Not $l_b_Identified Then
-                Item_IdentifyItem($l_p_Item, "Normal")
-                Sleep(250)
+    If Not PunchOut_EnsureIdentificationKit() Then
+        Update("No identification kit available")
+        Return
+    EndIf
+
+    Local $l_av_Inventory = Item_GetInventoryArray()
+    Local $l_i_Count = UBound($l_av_Inventory)
+    For $i = 0 To $l_i_Count - 1
+        If $l_av_Inventory[$i][$GC_I_INVENTORY_ISIDENTIFIED] Then ContinueLoop
+        If Not PunchOut_CanIdentifyItem($l_av_Inventory[$i][$GC_I_INVENTORY_ITEMTYPE], $l_av_Inventory[$i][$GC_I_INVENTORY_MODELID], $l_av_Inventory[$i][$GC_I_INVENTORY_RARITY]) Then ContinueLoop
+
+        If PunchOut_FindIdentificationKit() = 0 Then
+            If Not PunchOut_EnsureIdentificationKit() Then
+                Update("Ran out of identification kits")
+                Return
             EndIf
-        Next
+        EndIf
+
+        Item_IdentifyItem($l_av_Inventory[$i][$GC_I_INVENTORY_PTR], "Normal")
+        Sleep(50)
     Next
 EndFunc
 
 Func SellCycle()
     Update("Selling items...")
-    Local $l_a_Bags = [1, 2, 3, 4] 
-    For $bagIndex In $l_a_Bags
-        Local $l_p_Bag = Item_GetBagPtr($bagIndex)
-        If $l_p_Bag = 0 Then ContinueLoop
-        Local $l_i_Slots = Item_GetBagInfo($l_p_Bag, 'Slots')
-        For $slot = 1 To $l_i_Slots
-            Local $l_p_Item = Item_GetItemBySlot($bagIndex, $slot)
-            If $l_p_Item = 0 Then ContinueLoop
-            
-            Local $l_b_Identified = Item_GetItemInfoByPtr($l_p_Item, 'IsIdentified')
-            Local $l_i_Rarity = Item_GetItemInfoByPtr($l_p_Item, 'Rarity')
-            
-            ; Only sell White, Blue, Purple
-            If $l_b_Identified And ($l_i_Rarity = $GC_I_RARITY_WHITE Or $l_i_Rarity = $GC_I_RARITY_BLUE Or $l_i_Rarity = $GC_I_RARITY_PURPLE) Then
-                 ; Exclude Kits and Dyes
-                 Local $l_i_Type = Item_GetItemInfoByPtr($l_p_Item, 'ItemType')
-                 Local $l_i_ModelID = Item_GetItemInfoByPtr($l_p_Item, 'ModelID')
-                 
-                 If $l_i_Type <> $GC_I_TYPE_KIT And $l_i_Type <> $GC_I_TYPE_DYE Then
-                    ; Exclude Lockpicks, Stone Summit Emblems, Dwarven Ales, Superior Identification Kits, and Crafting Materials
-                    If $l_i_ModelID <> 22751 And $l_i_ModelID <> 27044 And $l_i_ModelID <> 5585 And $l_i_ModelID <> 24593 And $l_i_ModelID <> $GC_I_MODELID_SUPERIOR_IDENTIFICATION_KIT And $l_i_ModelID <> $GC_I_MODELID_IDENTIFICATION_KIT And Not IsCraftingMaterial($l_i_ModelID) Then
-
-                        Merchant_SellItem($l_p_Item)
-                        Sleep(250)
-                    EndIf
-                 EndIf
-            EndIf
-        Next
+    ; Re-read after identify so IsIdentified / rarity reflect kit results.
+    Local $l_av_Inventory = Item_GetInventoryArray()
+    Local $l_i_Count = UBound($l_av_Inventory)
+    For $i = 0 To $l_i_Count - 1
+        If PunchOut_ShouldSellItem($l_av_Inventory[$i][$GC_I_INVENTORY_ISIDENTIFIED], $l_av_Inventory[$i][$GC_I_INVENTORY_RARITY], $l_av_Inventory[$i][$GC_I_INVENTORY_ITEMTYPE], $l_av_Inventory[$i][$GC_I_INVENTORY_MODELID]) Then
+            Merchant_SellItem($l_av_Inventory[$i][$GC_I_INVENTORY_PTR])
+            Sleep(250)
+        EndIf
     Next
 EndFunc
 #EndRegion Merchant Logic
